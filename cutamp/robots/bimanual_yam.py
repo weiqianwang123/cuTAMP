@@ -18,6 +18,7 @@ this robot reuses their ``tool_from_ee`` rotation unchanged.
 """
 
 import logging
+import os
 from copy import deepcopy
 from functools import lru_cache
 from pathlib import Path
@@ -50,7 +51,23 @@ DUAL_JOINT_SLICES = {"left": slice(0, 6), "right": slice(6, 12)}
 
 # Elbow-up posture over a table. Doubles as cuRobo's retract/null-space config and as the pose the
 # idle arm is locked at, so it must match ARM_RETRACT in the generator that writes the yml.
-bimanual_yam_neutral_joint_positions = (0.0, np.pi / 4, np.pi / 2, 0.0, 0.0, 0.0)
+# The YAM's layout: the lab's (MolmoAct2's sim-eval mount, the arms 0.48 m apart on a column; the
+# default) or ABC-Sim's (``CUTAMP_YAM_LAYOUT=abc``: the same arms 0.62 m apart on the table's plane,
+# at ABC's teleoperation pose; ``bimanual_yam_abc_<arm>.yml`` over ``bimanual_yam_abc.urdf``). The
+# robot identifiers stay ``bimanual_yam_<arm>``, so everything downstream is unchanged.
+YAM_LAYOUT = os.environ.get("CUTAMP_YAM_LAYOUT", "")
+ABC_NEUTRAL_JOINT_POSITIONS = {  # ABC's init_q, each arm's
+    "left": (-0.20656902, 0.47283894, 0.99431604, -0.7043946, -0.30842298, -0.32864118),
+    "right": (0.20160982, 0.39005876, 1.1182956, -0.8726253, 0.13332571, 0.42629892),
+}
+bimanual_yam_neutral_joint_positions = (
+    ABC_NEUTRAL_JOINT_POSITIONS["left"] if YAM_LAYOUT == "abc" else (0.0, np.pi / 4, np.pi / 2, 0.0, 0.0, 0.0)
+)
+
+
+def yam_config_name(arm: str) -> str:
+    """The cuRobo config planning with ``arm`` in the layout chosen."""
+    return f"bimanual_yam_{YAM_LAYOUT + '_' if YAM_LAYOUT else ''}{arm}.yml"
 
 # Finger slide limit, fully open (MJCF actuator ctrlrange; the joint limit is -0.0485). Both fingers
 # of both hands are locked here for planning, so cuRobo models the widest the hand ever gets.
@@ -106,7 +123,7 @@ def yam_finger_joints(arm: Arm | None = None) -> list[str]:
 
 @lru_cache(maxsize=3)
 def _bimanual_yam_curobo_cfg_cached(arm: str) -> dict:
-    cfg = load_yaml(str(_ASSETS_DIR / f"bimanual_yam_{arm}.yml"))
+    cfg = load_yaml(str(_ASSETS_DIR / yam_config_name(arm)))
     # Set some asset paths so cuRobo can load our URDF and meshes
     for key in ("external_asset_path", "external_robot_configs_path"):
         if key not in cfg["robot_cfg"]["kinematics"]:
